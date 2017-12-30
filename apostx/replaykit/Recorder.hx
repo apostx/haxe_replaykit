@@ -6,47 +6,112 @@ import haxe.rtti.Rtti;
 
 class Recorder
 {
-	private var _timer:Timer;
-	private var _performer:IRecorderPerformer;
-	private var _snapshotList:Array<Snapshot>;
+	var _recordingStartTime:Float;
+	var _pauseStartTime:Float;
+	var _pauseTotalTime:Float;
+	var _autoRecordingDelay:Int;
+	var _isPaused:Bool;
+	var _isAutoRecordingEnabled:Bool;
+	var _timer:Timer;
+	var _performer:IRecorderPerformer;
+	var _snapshotList:Array<Snapshot>;
 	
 	public function new(performer:IRecorderPerformer)
 	{
-		_performer = performer;
 		_snapshotList = new Array<Snapshot>();
+		
+		_performer = performer;
+		
+		_isPaused = false;
+		_isAutoRecordingEnabled = false;
+		_pauseTotalTime = 0;
+		_recordingStartTime = Date.now().getTime();
 	}
 	
+	public function pause():Void
+	{
+		if (_isPaused)
+		{
+			return;
+		}
+			
+		_isPaused = true;
+		_pauseStartTime = Date.now().getTime();
+		
+		forceDisableAutoRecording();
+	}
+	
+	public function resume():Void
+	{
+		if (!_isPaused)
+		{
+			return;
+		}
+		
+		_isPaused = false;
+		_pauseTotalTime += Date.now().getTime() - _pauseStartTime;
+		
+		if (_isAutoRecordingEnabled)
+		{
+			forceEnableAutoRecording();
+		}
+	}
+
 	public function takeSnapshot():Void
 	{
+		if (_isPaused)
+		{
+			return;
+		}
+		
 		var serializer:Serializer = new Serializer();
 		_performer.serialize(serializer);
 		
 		var snapshot:Snapshot = {
-			timestamp: Date.now().getTime(),
+			timestamp: getElapsedTime(),
 			data: serializer.toString()
 		}
 		
 		_snapshotList.push(snapshot);
 	}
 	
-	public function startRecording(delay_ms:Int):Void
+	public function enableAutoRecording(delay_ms:Int):Void
 	{
-		stopRecording();
-		_timer = new Timer(delay_ms);
+		_isAutoRecordingEnabled = true;
+		_autoRecordingDelay = delay_ms;
+		
+		forceEnableAutoRecording();
+	}
+	
+	public function forceEnableAutoRecording():Void
+	{
+		if (_isPaused)
+		{
+			return;
+		}
+		
+		forceDisableAutoRecording();
+		
+		_timer = new Timer(_autoRecordingDelay);
 		_timer.run = takeSnapshot;
 		takeSnapshot();
 	}
 	
-	public function stopRecording():Void
+	public function disableAutoRecording():Void
 	{
-		_timer.stop();
-		_timer.run = null;
-		_timer = null;
+		_isAutoRecordingEnabled = false;
+		
+		forceDisableAutoRecording();
 	}
 	
-	public function isRecording():Bool
+	private function forceDisableAutoRecording():Void
 	{
-		return _timer != null;
+		if (_timer != null)
+		{
+			_timer.stop();
+			_timer.run = null;
+			_timer = null;
+		}
 	}
 	
 	public function toString():String
@@ -54,5 +119,18 @@ class Recorder
 		var serializer:Serializer = new Serializer();
 		serializer.serialize(_snapshotList);
 		return serializer.toString();
+	}
+	
+	public function getElapsedTime():Float
+	{
+		return Date.now().getTime() -  _recordingStartTime - _pauseTotalTime;
+	}
+	
+	public function dispose():Void
+	{
+		forceDisableAutoRecording();
+		_snapshotList.splice(0, _snapshotList.length);
+		_snapshotList = null;
+		_performer = null;
 	}
 }
